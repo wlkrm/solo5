@@ -130,17 +130,17 @@ int tap_attach(const char *ifname)
         return -1;
 
     /*
-     * Initialise ifr for TAP interface.
+     * Initialise ifr for TUN interface (raw IP, no Ethernet header).
      */
     memset(&ifr, 0, sizeof(ifr));
     /*
      * TODO: IFF_NO_PI may silently truncate packets on read().
      */
-    ifr.ifr_flags = IFF_TAP | IFF_NO_PI;
+    ifr.ifr_flags = IFF_TUN | IFF_NO_PI;
     strncpy(ifr.ifr_name, ifname, IFNAMSIZ - 1);
 
     /*
-     * Attach to the tap device; we have already verified that it exists, but
+     * Attach to the tun device; we have already verified that it exists, but
      * see below.
      */
     if (ioctl(fd, TUNSETIFF, (void *)&ifr) == -1) {
@@ -149,6 +149,7 @@ int tap_attach(const char *ifname)
         errno = err;
         return -1;
     }
+    errno = 0;
     /*
      * If we got back a different device than the one requested, e.g. because
      * the caller mistakenly passed in '%d' (yes, that's really in the Linux

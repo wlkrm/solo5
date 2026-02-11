@@ -119,9 +119,13 @@ fn main() -> io::Result<()> {
         bind_addr, iface, sample_limit
     );
 
-    let (tx, rx) = mpsc::channel::<(usize, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>)>();
+    let (tx, rx) = mpsc::channel::<(Vec<u64>, Vec<u64>, Vec<u64>, Vec<u64>)>();
     let writer = thread::spawn(move || {
-        while let Ok((count, x, actual_rel, recv_rel, inter_x, inter_packet)) = rx.recv() {
+        while let Ok((planned, actual, send, recv)) = rx.recv() {
+            let count = planned.len();
+            let (x, actual_rel, recv_rel) = build_series(&planned, &actual, &send, &recv);
+            let (inter_x, inter_packet) = build_inter_packet_series(&recv);
+
             let mut plot = Plot::new();
             plot.add_trace(
                 Scatter::new(x.clone(), actual_rel)
@@ -131,7 +135,7 @@ fn main() -> io::Result<()> {
             plot.add_trace(
                 Scatter::new(x, recv_rel)
                     .mode(Mode::Lines)
-                    .name("send->recv latency"),
+                    .name("message latency"),
             );
 
             let html = plot.to_html();
@@ -187,10 +191,8 @@ fn main() -> io::Result<()> {
         recv.push(recv_ns);
 
         if planned.len() % WRITE_EVERY == 0 || planned.len() == sample_limit {
-            let (x, actual_rel, recv_rel) = build_series(&planned, &actual, &send, &recv);
-            let (inter_x, inter_packet) = build_inter_packet_series(&recv);
             if tx
-                .send((planned.len(), x, actual_rel, recv_rel, inter_x, inter_packet))
+                .send((planned.clone(), actual.clone(), send.clone(), recv.clone()))
                 .is_err()
             {
                 eprintln!("Writer thread disconnected; skipping HTML output.");

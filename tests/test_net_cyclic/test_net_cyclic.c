@@ -258,9 +258,12 @@ static bool send_udp_packet(int ifindex, const uint8_t *payload,
     if (sizeof(*p) + payload_len > sizeof(buf))
         return false;
 
+#define TUN_MODE
+#ifndef TUN_MODE
     memcpy(p->ether.target, macaddr_brd, HLEN_ETHER);
     memcpy(p->ether.source, ni[ifindex].info.mac_address, HLEN_ETHER);
     p->ether.type = htons(ETHERTYPE_IP);
+#endif
 
     p->ip.version_ihl = 0x45;
     p->ip.type = 0x00;
@@ -281,8 +284,15 @@ static bool send_udp_packet(int ifindex, const uint8_t *payload,
     memcpy(p->data, payload, payload_len);
     p->checksum = udp_checksum(&p->ip, p, udp_len);
 
+#ifdef TUN_MODE
+    /* TUN mode: send raw IP packet without Ethernet header */
+    if (solo5_net_write(ni[ifindex].h, (uint8_t *)&p->ip,
+            sizeof(struct ip) + udp_len) != SOLO5_R_OK) {
+#else
+    /* TAP mode: send full Ethernet frame */
     if (solo5_net_write(ni[ifindex].h, (uint8_t *)p,
             sizeof(struct udppkt) + payload_len) != SOLO5_R_OK) {
+#endif
         xputs(ifindex, "Write error\n");
         return false;
     }
@@ -290,30 +300,30 @@ static bool send_udp_packet(int ifindex, const uint8_t *payload,
     return true;
 }
 
-static void send_garp(int ifindex)
-{
-    struct arppkt p;
-    uint8_t zero[HLEN_ETHER] = { 0 };
+// static void send_garp(int ifindex)
+// {
+//     struct arppkt p;
+//     uint8_t zero[HLEN_ETHER] = { 0 };
 
-    /*
-     * Send a gratuitous ARP packet announcing our MAC address.
-     */
-    memcpy(p.ether.source, ni[ifindex].info.mac_address, HLEN_ETHER);
-    memcpy(p.ether.target, macaddr_brd, HLEN_ETHER);
-    p.ether.type = htons(ETHERTYPE_ARP);
-    p.arp.htype = htons(1);
-    p.arp.ptype = htons(ETHERTYPE_IP);
-    p.arp.hlen = HLEN_ETHER;
-    p.arp.plen = PLEN_IPV4;
-    p.arp.op = htons(1);
-    memcpy(p.arp.sha, ni[ifindex].info.mac_address, HLEN_ETHER);
-    memcpy(p.arp.tha, zero, HLEN_ETHER);
-    memcpy(p.arp.spa, ni[ifindex].ipaddr, PLEN_IPV4);
-    memcpy(p.arp.tpa, ni[ifindex].ipaddr, PLEN_IPV4);
+//     /*
+//      * Send a gratuitous ARP packet announcing our MAC address.
+//      */
+//     memcpy(p.ether.source, ni[ifindex].info.mac_address, HLEN_ETHER);
+//     memcpy(p.ether.target, macaddr_brd, HLEN_ETHER);
+//     p.ether.type = htons(ETHERTYPE_ARP);
+//     p.arp.htype = htons(1);
+//     p.arp.ptype = htons(ETHERTYPE_IP);
+//     p.arp.hlen = HLEN_ETHER;
+//     p.arp.plen = PLEN_IPV4;
+//     p.arp.op = htons(1);
+//     memcpy(p.arp.sha, ni[ifindex].info.mac_address, HLEN_ETHER);
+//     memcpy(p.arp.tha, zero, HLEN_ETHER);
+//     memcpy(p.arp.spa, ni[ifindex].ipaddr, PLEN_IPV4);
+//     memcpy(p.arp.tpa, ni[ifindex].ipaddr, PLEN_IPV4);
 
-    if (solo5_net_write(ni[ifindex].h, (uint8_t *)&p, sizeof p) != SOLO5_R_OK)
-        xputs(ifindex, "Could not send GARP packet\n");
-}
+//     if (solo5_net_write(ni[ifindex].h, (uint8_t *)&p, sizeof p) != SOLO5_R_OK)
+//         xputs(ifindex, "Could not send GARP packet\n");
+// }
 
 
 static bool cyclic_udp_send(solo5_time_t interval_ns)
@@ -329,7 +339,7 @@ static bool cyclic_udp_send(solo5_time_t interval_ns)
     puts(macaddr_s);
     puts("\n");
 
-    send_garp(0);
+    // send_garp(0);
     solo5_time_t start_time = solo5_clock_monotonic();
     uint64_t cycle = 1;
     for (;;) {
