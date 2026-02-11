@@ -155,6 +155,33 @@ static uint16_t udp_checksum(const struct ip *ip, const struct udppkt *udp,
     return (sum == 0) ? 0xffff : sum;
 }
 
+static bool parse_u64(const char *s, uint64_t *out)
+{
+    uint64_t value = 0;
+
+    if (*s == '\0')
+        return false;
+
+    while (*s) {
+        if (*s < '0' || *s > '9')
+            return false;
+        uint64_t next = value * 10 + (uint64_t)(*s - '0');
+        if (next < value)
+            return false;
+        value = next;
+        s++;
+    }
+
+    *out = value;
+    return true;
+}
+
+static void write_u64_be(uint8_t *dst, uint64_t value)
+{
+    for (int i = 0; i < 8; i++)
+        dst[i] = (uint8_t)(value >> (56 - (i * 8)));
+}
+
 static void tohexs(char *dst, uint8_t *src, size_t size)
 {
     while (size--) {
@@ -190,168 +217,6 @@ struct netif ni[] = {
 uint8_t ipaddr_brdall[4] = { 0xff, 0xff, 0xff, 0xff }; /* 255.255.255.255 */
 uint8_t macaddr_brd[HLEN_ETHER] = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
 
-static unsigned long n_pings_received = 0;
-static bool opt_verbose = false;
-static bool opt_limit = false;
-
-static bool handle_arp(int ifindex, uint8_t *buf)
-{
-    struct arppkt *p = (struct arppkt *)buf;
-
-    if (p->arp.htype != htons(1))
-        return false;
-
-    if (p->arp.ptype != htons(ETHERTYPE_IP))
-        return false;
-
-    if (p->arp.hlen != HLEN_ETHER || p->arp.plen != PLEN_IPV4)
-        return false;
-
-    if (p->arp.op != htons(1))
-        return false;
-
-    if (memcmp(p->arp.tpa, ni[ifindex].ipaddr, PLEN_IPV4))
-        return false;
-
-    /* reorder ether net header addresses */
-    memcpy(p->ether.target, p->ether.source, HLEN_ETHER);
-    memcpy(p->ether.source, ni[ifindex].info.mac_address, HLEN_ETHER);
-    memcpy(p->arp.tha, p->arp.sha, HLEN_ETHER);
-    memcpy(p->arp.sha, ni[ifindex].info.mac_address, HLEN_ETHER);
-
-    /* request -> reply */
-    p->arp.op = htons(2);
-
-    /* spa -> tpa */
-    memcpy(p->arp.tpa, p->arp.spa, PLEN_IPV4);
-
-    /* our ip -> spa */
-    memcpy(p->arp.spa, ni[ifindex].ipaddr, PLEN_IPV4);
-
-    return true;
-}
-
-static bool handle_ip(int ifindex, uint8_t *buf, uint8_t *data_buf, uint8_t *buffer_len, bool *was_udp)
-{
-    struct pingpkt *p = (struct pingpkt *)buf;
-
-    if (p->ip.version_ihl != 0x45)
-        return false; /* we don't support IPv6, yet :-) */
-
-    if (p->ip.type != 0x00)
-        return false;
-   
-    switch(p->ip.proto) {
-        case 0x01: /* ICMP */
-            if (memcmp(p->ip.dst_ip, ni[ifindex].ipaddr, PLEN_IPV4) &&
-                    memcmp(p->ip.dst_ip, ni[ifindex].ipaddr_brdnet, PLEN_IPV4) &&
-                    memcmp(p->ip.dst_ip, ipaddr_brdall, PLEN_IPV4))
-                    return false; /* not ip addressed to us */
-
-                if (p->ping.type != 0x08)
-                    return false; /* not an echo request */
-
-                if (p->ping.code != 0x00)
-                    return false;
-
-                /* reorder ether net header addresses */
-                memcpy(p->ether.target, p->ether.source, HLEN_ETHER);
-                memcpy(p->ether.source, ni[ifindex].info.mac_address, HLEN_ETHER);
-
-                p->ip.id = 0;
-                p->ip.flags_offset = 0;
-
-                /* reorder ip net header addresses */
-                memcpy(p->ip.dst_ip, p->ip.src_ip, PLEN_IPV4);
-                memcpy(p->ip.src_ip, ni[ifindex].ipaddr, PLEN_IPV4);
-
-                /* recalculate ip checksum for return pkt */
-                p->ip.checksum = 0;
-                p->ip.checksum = checksum((uint16_t *) &p->ip, sizeof(struct ip));
-
-                p->ping.type = 0x0; /* change into reply */
-
-                /* recalculate ICMP checksum */
-                p->ping.checksum = 0;
-                p->ping.checksum = checksum((uint16_t *) &p->ping,
-                        htons(p->ip.length) - sizeof(struct ip));
-
-                n_pings_received++;
-                return true;
-        
-        case 0x11: /* UDP */
-            struct udppkt *up = (struct udppkt *)buf;
-            uint16_t udp_len = htons(up->length);
-
-            if (udp_len < 8)
-                return false;
-
-            if (memcmp(up->ip.dst_ip, ni[ifindex].ipaddr, PLEN_IPV4) &&
-                    memcmp(up->ip.dst_ip, ni[ifindex].ipaddr_brdnet, PLEN_IPV4) &&
-                    memcmp(up->ip.dst_ip, ipaddr_brdall, PLEN_IPV4))
-                return false; /* not ip addressed to us */
-
-            /* reorder ether net header addresses */
-            memcpy(up->ether.target, up->ether.source, HLEN_ETHER);
-            memcpy(up->ether.source, ni[ifindex].info.mac_address, HLEN_ETHER);
-
-            /* reorder ip net header addresses */
-            memcpy(up->ip.dst_ip, up->ip.src_ip, PLEN_IPV4);
-            memcpy(up->ip.src_ip, ni[ifindex].ipaddr, PLEN_IPV4);
-
-            /* swap UDP ports */
-            uint16_t tmp_port = up->src_port;
-            up->src_port = up->dst_port;
-            up->dst_port = tmp_port;
-
-            /* recalculate ip checksum for return pkt */
-            up->ip.checksum = 0;
-            up->ip.checksum = checksum((uint16_t *) &up->ip, sizeof(struct ip));
-
-            /* recalculate UDP checksum (IPv4 optional, but safer to include) */
-            up->checksum = 0;
-            up->checksum = udp_checksum(&up->ip, up, udp_len);
-            xputs(ifindex, "Received UDP packet, sending reply\n");
-            *was_udp = true;
-            *buffer_len = udp_len - 8;
-            memcpy(data_buf, up->data, *buffer_len);
-            return true;
-
-        default:
-            return false; /* not supported */
-
-    }
-
-
-    return true;
-}
-
-static void send_garp(int ifindex)
-{
-    struct arppkt p;
-    uint8_t zero[HLEN_ETHER] = { 0 };
-
-    /*
-     * Send a gratuitous ARP packet announcing our MAC address.
-     */
-    memcpy(p.ether.source, ni[ifindex].info.mac_address, HLEN_ETHER);
-    memcpy(p.ether.target, macaddr_brd, HLEN_ETHER);
-    p.ether.type = htons(ETHERTYPE_ARP);
-    p.arp.htype = htons(1);
-    p.arp.ptype = htons(ETHERTYPE_IP);
-    p.arp.hlen = HLEN_ETHER;
-    p.arp.plen = PLEN_IPV4;
-    p.arp.op = htons(1);
-    memcpy(p.arp.sha, ni[ifindex].info.mac_address, HLEN_ETHER);
-    memcpy(p.arp.tha, zero, HLEN_ETHER);
-    memcpy(p.arp.spa, ni[ifindex].ipaddr, PLEN_IPV4);
-    memcpy(p.arp.tpa, ni[ifindex].ipaddr, PLEN_IPV4);
-
-    if (solo5_net_write(ni[ifindex].h, (uint8_t *)&p, sizeof p) != SOLO5_R_OK)
-        xputs(ifindex, "Could not send GARP packet\n");
-}
-
-static const solo5_time_t NSEC_PER_SEC = 1000000000ULL;
 
 void put_uint8_t(uint8_t buffer_len) {
     char str[4]; // Max 255 + null terminator
@@ -381,162 +246,126 @@ void put_uint8_t(uint8_t buffer_len) {
     puts(str);
 }
 
-static bool handle_packet(int ifindex, uint8_t *data_buf, uint8_t *buffer_len,
-    bool *was_udp, uint8_t *reply_buf, size_t *reply_len,
-    bool *reply_pending)
+static bool send_udp_packet(int ifindex, const uint8_t *payload,
+        size_t payload_len)
 {
     uint8_t buf[ni[ifindex].info.mtu + SOLO5_NET_HLEN];
-    solo5_result_t result;
-    size_t len;
-    struct ether *p = (struct ether *)&buf;
-    bool handled = false;
+    struct udppkt *p = (struct udppkt *)buf;
+    uint16_t udp_len = (uint16_t)(8 + payload_len);
+    uint16_t ip_len = (uint16_t)(sizeof(struct ip) + udp_len);
+    uint8_t dst_ip[PLEN_IPV4] = { 0x0a, 0x00, 0x00, 0x01 }; /* 10.0.0.1 */
 
-    result = solo5_net_read(ni[ifindex].h, buf, sizeof buf, &len);
-    if (result != SOLO5_R_OK) {
-        xputs(ifindex, "Read error\n");
+    if (sizeof(*p) + payload_len > sizeof(buf))
         return false;
-    }
 
-    if (memcmp(p->target, ni[ifindex].info.mac_address, HLEN_ETHER) &&
-        memcmp(p->target, macaddr_brd, HLEN_ETHER))
-        return true; /* not ether addressed to us */
+    memcpy(p->ether.target, macaddr_brd, HLEN_ETHER);
+    memcpy(p->ether.source, ni[ifindex].info.mac_address, HLEN_ETHER);
+    p->ether.type = htons(ETHERTYPE_IP);
 
-    switch (htons(p->type)) {
-        case ETHERTYPE_ARP:
-            if (handle_arp(ifindex, buf)) {
-                handled = true;
-                if (opt_verbose)
-                    xputs(ifindex, "Received arp request, sending reply\n");
-            }
-            break;
-        case ETHERTYPE_IP:
-            if (handle_ip(ifindex, buf, data_buf, buffer_len, was_udp)) {
-                // if (opt_verbose)
-                //     xputs(ifindex, "Received ping, sending reply\n");
-                handled = true;
-            }
-            break;
-        default:
-            break;
-    }
+    p->ip.version_ihl = 0x45;
+    p->ip.type = 0x00;
+    p->ip.length = htons(ip_len);
+    p->ip.id = 0;
+    p->ip.flags_offset = 0;
+    p->ip.ttl = 64;
+    p->ip.proto = 0x11;
+    p->ip.checksum = 0;
+    memcpy(p->ip.src_ip, ni[ifindex].ipaddr, PLEN_IPV4);
+    memcpy(p->ip.dst_ip, dst_ip, PLEN_IPV4);
+    p->ip.checksum = checksum((uint16_t *) &p->ip, sizeof(struct ip));
 
-    if (handled) {
-        if (*was_udp) {
-            memcpy(reply_buf, buf, len);
-            *reply_len = len;
-            *reply_pending = true;
-        }
-        else {
-            if (solo5_net_write(ni[ifindex].h, buf, len) != SOLO5_R_OK) {
-                xputs(ifindex, "Write error\n");
-                return false;
-            }
-        }
-    }
-    else {
-        xputs(ifindex, "Unknown or unsupported packet, dropped\n");
+    p->src_port = htons(8000);
+    p->dst_port = htons(8000);
+    p->length = htons(udp_len);
+    p->checksum = 0;
+    memcpy(p->data, payload, payload_len);
+    p->checksum = udp_checksum(&p->ip, p, udp_len);
+
+    if (solo5_net_write(ni[ifindex].h, (uint8_t *)p,
+            sizeof(struct udppkt) + payload_len) != SOLO5_R_OK) {
+        xputs(ifindex, "Write error\n");
+        return false;
     }
 
     return true;
 }
 
-static bool ping_serve(void)
+static void send_garp(int ifindex)
+{
+    struct arppkt p;
+    uint8_t zero[HLEN_ETHER] = { 0 };
+
+    /*
+     * Send a gratuitous ARP packet announcing our MAC address.
+     */
+    memcpy(p.ether.source, ni[ifindex].info.mac_address, HLEN_ETHER);
+    memcpy(p.ether.target, macaddr_brd, HLEN_ETHER);
+    p.ether.type = htons(ETHERTYPE_ARP);
+    p.arp.htype = htons(1);
+    p.arp.ptype = htons(ETHERTYPE_IP);
+    p.arp.hlen = HLEN_ETHER;
+    p.arp.plen = PLEN_IPV4;
+    p.arp.op = htons(1);
+    memcpy(p.arp.sha, ni[ifindex].info.mac_address, HLEN_ETHER);
+    memcpy(p.arp.tha, zero, HLEN_ETHER);
+    memcpy(p.arp.spa, ni[ifindex].ipaddr, PLEN_IPV4);
+    memcpy(p.arp.tpa, ni[ifindex].ipaddr, PLEN_IPV4);
+
+    if (solo5_net_write(ni[ifindex].h, (uint8_t *)&p, sizeof p) != SOLO5_R_OK)
+        xputs(ifindex, "Could not send GARP packet\n");
+}
+
+
+static bool cyclic_udp_send(solo5_time_t interval_ns)
 {
     if (solo5_net_acquire("service0", &ni[0].h, &ni[0].info) != SOLO5_R_OK) {
         puts("Could not acquire 'service0' network\n");
         return false;
     }
-#ifdef TWO_INTERFACES
-    if (solo5_net_acquire("service1", &ni[1].h, &ni[1].info) != SOLO5_R_OK) {
-        puts("Could not acquire 'service1' network\n");
-        return false;
-    }
-#endif
 
     char macaddr_s[(HLEN_ETHER * 2) + 2];
     tohexs(macaddr_s, ni[0].info.mac_address, HLEN_ETHER);
-    xputs(0, "Serving ping on 10.0.0.3, with MAC: ");
+    xputs(0, "Sending UDP to 10.0.0.1:8000, MAC: ");
     puts(macaddr_s);
     puts("\n");
 
     send_garp(0);
-
-#ifdef TWO_INTERFACES
-    tohexs(macaddr_s, ni[1].info.mac_address, HLEN_ETHER);
-    xputs(1, "Serving ping on 10.1.0.2, with MAC: ");
-    puts(macaddr_s);
-    puts("\n");
-
-    send_garp(1);
-#endif
-
-    uint8_t data_buffer[2048] = { 0 };
-    uint8_t buffer_len = 0;
-    bool was_udp = false;
-    uint8_t reply_buffer[ni[0].info.mtu + SOLO5_NET_HLEN];
-    size_t reply_len = 0;
-    bool reply_pending = false;
-
+    solo5_time_t start_time = solo5_clock_monotonic();
+    uint64_t cycle = 1;
     for (;;) {
-        solo5_handle_set_t ready_set = 0;
+        solo5_time_t planned_wakeup = start_time + (cycle * interval_ns);
+        solo5_clock_nanosleep(planned_wakeup);
+        solo5_time_t actual_wakeup = solo5_clock_monotonic();
+        solo5_time_t before_send = solo5_clock_monotonic();
 
-        was_udp = false;
-        reply_pending = false;
-        solo5_yield(solo5_clock_monotonic() + NSEC_PER_SEC, &ready_set);
-        if (ready_set & 1U << ni[0].h) {
-            if (!handle_packet(0, data_buffer, &buffer_len, &was_udp,
-                    reply_buffer, &reply_len, &reply_pending)) {
-                return false;
-            } 
-            if (was_udp) {
-                /* Echo back UDP data on console */
-                xputs(0, "UDP data: ");
-                for (int i = 0; i < 1; i++) {
-                    puts((char*)&data_buffer[i]);
-                }
-                puts(" (");
-                put_uint8_t(buffer_len);
-                puts(")");
-                if (reply_pending) {
-                    if (solo5_net_write(ni[0].h, reply_buffer, reply_len)
-                            != SOLO5_R_OK) {
-                        xputs(0, "Write error\n");
-                        return false;
-                    }
-                }
-            }
-        }
+        uint8_t payload[24];
+        write_u64_be(&payload[0], planned_wakeup);
+        write_u64_be(&payload[8], actual_wakeup);
+        write_u64_be(&payload[16], before_send);
 
-            if (opt_limit && n_pings_received >= 100000) {
-                puts("Limit reached, exiting\n");
-                break;
-            }
-        }
-
-
-    return true;
+        if (!send_udp_packet(0, payload, sizeof(payload)))
+            return false;
+        cycle++;
+    }
 }
 
 int solo5_app_main(const struct solo5_start_info *si)
 {
-    puts("\n**** Solo5 standalone test_net ****\n\n");
+    puts("\n**** Solo5 standalone test_net_cyclic ****\n\n");
 
-    if (strlen(si->cmdline) >= 1) {
-        switch (si->cmdline[0]) {
-        case 'v':
-            opt_verbose = true;
-            break;
-        case 'l':
-            opt_limit = true;
-            break;
-        default:
-            puts("Error in command line.\n");
-            puts("Usage: test_net [ verbose | limit ]\n");
-            return SOLO5_EXIT_FAILURE;
-        }
+    if (solo5_sched_setscheduler(SOLO5_SCHED_FIFO, 90) != SOLO5_R_OK)
+        puts("sched_setscheduler not supported\n");
+
+    uint64_t cycle_us = 0;
+    if (!parse_u64(si->cmdline, &cycle_us) || cycle_us == 0) {
+        puts("Error in command line.\n");
+        puts("Usage: test_net_cyclic <cycle_us>\n");
+        return SOLO5_EXIT_FAILURE;
     }
 
-    if (ping_serve()) {
+    solo5_time_t interval_ns = cycle_us * 1000ULL;
+
+    if (cyclic_udp_send(interval_ns)) {
         puts("SUCCESS\n");
         return SOLO5_EXIT_SUCCESS;
     }
