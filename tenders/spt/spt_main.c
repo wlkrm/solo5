@@ -34,6 +34,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <sys/mman.h>
 
 #include "spt.h"
 #include "version.h"
@@ -129,7 +130,7 @@ static void version(const char *prog)
 }
 
 int main(int argc, char **argv)
-{
+{   
     size_t mem_size = 0x20000000;
     uint64_t p_entry, p_end;
     const char *prog;
@@ -249,6 +250,11 @@ int main(int argc, char **argv)
     setup_modules(spt, mft);
 
     spt_boot_info_init(spt, p_end, argc, argv, mft, mft_size);
+
+    int ret = mlockall( MCL_FUTURE);
+    if(ret != 0) {
+        err(1, "mlockall failed");
+    }
 
     spt_run(spt, p_entry);
 }

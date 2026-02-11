@@ -1,0 +1,9 @@
+{
+    "makefile.configurations": [
+        {
+            "name": "Unnamed configuration 1",
+            "makefilePath": "./GNUmakefile"
+        }
+    ],
+    "makefile.makefilePath": "./GNUmakefile"
+}

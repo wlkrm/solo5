@@ -34,8 +34,10 @@
 #define SYS_write 1
 #define SYS_pread64 17
 #define SYS_pwrite64 18
+#define SYS_sched_setscheduler 144
 #define SYS_arch_prctl 158
 #define SYS_clock_gettime 228
+#define SYS_clock_nanosleep 230
 #define SYS_exit_group 231
 #define SYS_epoll_pwait 281
 #define SYS_timerfd_settime 286
@@ -124,6 +126,22 @@ long sys_clock_gettime(const long which, void *ts)
     return ret;
 }
 
+long sys_clock_nanosleep(struct sys_timespec *ts)
+{
+    long ret;
+    register long r10 __asm__("r10") = 0;
+
+    __asm__ __volatile__ (
+            "syscall"
+            : "=a" (ret)
+            : "a" (SYS_clock_nanosleep), "D" (SYS_CLOCK_MONOTONIC),
+              "S" (SYS_TIMER_ABSTIME), "d" (ts), "r" (r10)
+            : "rcx", "r11", "memory"
+    );
+
+    return ret;
+}
+
 long sys_epoll_pwait(long epfd, void *events, long maxevents, long timeout,
         void *sigmask, long sigsetsize)
 {
@@ -171,4 +189,20 @@ long sys_arch_prctl(long code, long addr)
     );
 
     return ret;
+}
+
+long sys_sched_setscheduler(long pid, long policy,
+                                const struct sys_sched_param *param)
+{
+                long ret;
+
+                __asm__ __volatile__ (
+                                                "syscall"
+                                                : "=a" (ret)
+                                                : "a" (SYS_sched_setscheduler), "D" (pid), "S" (policy),
+                                                        "d" (param)
+                                                : "rcx", "r11", "memory"
+                );
+
+                return ret;
 }

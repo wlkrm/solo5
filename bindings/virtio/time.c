@@ -36,6 +36,16 @@ solo5_time_t solo5_clock_monotonic(void)
         return tscclock_monotonic();
 }
 
+long solo5_clock_nanosleep(solo5_time_t time) { return time; }
+
+solo5_result_t solo5_sched_setscheduler(solo5_sched_policy_t policy,
+        int priority)
+{
+    (void)policy;
+    (void)priority;
+    return SOLO5_R_EUNSPEC;
+}
+
 /* return wall time in nsecs */
 solo5_time_t solo5_clock_wall(void)
 {

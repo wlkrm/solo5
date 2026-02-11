@@ -95,6 +95,16 @@ uint64_t tscclock_epochoffset(void)
     return ti.tsc_time_base * 1000;
 }
 
+long solo5_clock_nanosleep(solo5_time_t time) { return time; }
+
+solo5_result_t solo5_sched_setscheduler(solo5_sched_policy_t policy,
+        int priority)
+{
+    (void)policy;
+    (void)priority;
+    return SOLO5_R_EUNSPEC;
+}
+
 solo5_time_t solo5_clock_wall(void)
 {
     solo5_time_t timestamp;

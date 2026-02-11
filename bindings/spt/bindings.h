@@ -52,8 +52,20 @@ struct sys_itimerspec {
 
 #define SYS_CLOCK_REALTIME 0
 #define SYS_CLOCK_MONOTONIC 1
+#define SYS_TIMER_ABSTIME (1 << 0)
 
 long sys_clock_gettime(const long which, void *ts);
+long sys_clock_nanosleep(struct sys_timespec *ts);
+
+struct sys_sched_param {
+    int sched_priority;
+};
+
+#define SYS_SCHED_FIFO 1
+#define SYS_SCHED_RR 2
+
+long sys_sched_setscheduler(long pid, long policy,
+        const struct sys_sched_param *param);
 
 #define SYS_EINTR -4
 #define SYS_EAGAIN -11

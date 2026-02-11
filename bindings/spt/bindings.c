@@ -25,6 +25,36 @@ void solo5_console_write(const char *buf, size_t size)
     (void)sys_write(SYS_STDOUT, buf, size);
 }
 
+long solo5_clock_nanosleep(solo5_time_t time) {
+    struct sys_timespec ts;
+
+    ts.tv_sec = time / NSEC_PER_SEC;
+    ts.tv_nsec = time - (( time / NSEC_PER_SEC) * NSEC_PER_SEC);
+    
+    int rc = sys_clock_nanosleep(&ts);
+
+    return rc;
+}
+
+    solo5_result_t solo5_sched_setscheduler(solo5_sched_policy_t policy,
+            int priority)
+    {
+        struct sys_sched_param param;
+        long rc;
+
+        if (policy != SOLO5_SCHED_FIFO && policy != SOLO5_SCHED_RR)
+            return SOLO5_R_EINVAL;
+        if (priority < 0)
+            return SOLO5_R_EINVAL;
+
+        param.sched_priority = priority;
+        rc = sys_sched_setscheduler(0, policy, &param);
+        if (rc == 0)
+            return SOLO5_R_OK;
+        return SOLO5_R_EUNSPEC;
+    }
+
+
 /* solo5_exit is in exit.c */
 
 /* solo5_abort is in abort.c */

@@ -187,7 +187,23 @@ solo5_result_t solo5_set_tls_base(uintptr_t base);
  * The use of these two clocks should therefore be well defined. One has the
  * advantage of being very fast (but can shift in relation to the real elapsed
  * time). The other is more accurate but requires more resources.
- *
+ */
+
+/*
+ * Scheduler policy for solo5_sched_setscheduler().
+ */
+typedef enum {
+    SOLO5_SCHED_FIFO = 1,
+    SOLO5_SCHED_RR = 2
+} solo5_sched_policy_t;
+
+/*
+ * Set the scheduler policy and priority for the current thread.
+ */
+solo5_result_t solo5_sched_setscheduler(solo5_sched_policy_t policy,
+        int priority);
+
+/*
  * NOTE: For the muen and xen target, we still use a TSC-based wall-clock. Muen
  * or Xen are not able to expose an hypercall to know the host's wall-clock.
  */
@@ -196,6 +212,8 @@ solo5_result_t solo5_set_tls_base(uintptr_t base);
  * Solo5 type for time values, with nanosecond precision.
  */
 typedef uint64_t solo5_time_t;
+
+long solo5_clock_nanosleep(solo5_time_t time);
 
 /*
  * Returns monotonic time since an unspecified period in the past.

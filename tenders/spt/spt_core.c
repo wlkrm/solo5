@@ -318,7 +318,10 @@ static int handle_cmdarg(char *cmdarg, struct mft *mft)
 static int setup(struct spt *spt, struct mft *mft)
 {
     int rc = -1;
-
+    rc = seccomp_rule_add(spt->sc_ctx, SCMP_ACT_ALLOW,
+        SCMP_SYS(sched_setscheduler), 0);
+    rc = seccomp_rule_add(spt->sc_ctx, SCMP_ACT_ALLOW, SCMP_SYS(clock_nanosleep), 1,
+            SCMP_A0(SCMP_CMP_EQ, 1));
     rc = seccomp_rule_add(spt->sc_ctx, SCMP_ACT_ALLOW, SCMP_SYS(write), 1,
             SCMP_A0(SCMP_CMP_EQ, 1));
     if (rc != 0)

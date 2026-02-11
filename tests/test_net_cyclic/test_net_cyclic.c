@@ -176,7 +176,7 @@ struct netif {
 
 struct netif ni[] = {
     {
-        .ipaddr = { 0x0a, 0x00, 0x00, 0x02 }, /* 10.0.0.2 */
+        .ipaddr = { 0x0a, 0x00, 0x00, 0x03 }, /* 10.0.0.3 */
         .ipaddr_brdnet = { 0x0a, 0x00, 0x00, 0xff } /* 10.0.0.255 */
     },
 #ifdef TWO_INTERFACES
@@ -453,9 +453,9 @@ static bool ping_serve(void)
     }
 #endif
 
-    char macaddr_s[(HLEN_ETHER * 2) + 1];
+    char macaddr_s[(HLEN_ETHER * 2) + 2];
     tohexs(macaddr_s, ni[0].info.mac_address, HLEN_ETHER);
-    xputs(0, "Serving ping on 10.0.0.2, with MAC: ");
+    xputs(0, "Serving ping on 10.0.0.3, with MAC: ");
     puts(macaddr_s);
     puts("\n");
 
