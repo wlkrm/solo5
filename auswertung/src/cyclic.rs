@@ -1,5 +1,6 @@
 use plotly::common::Mode;
 use plotly::{Plot, Scatter};
+use std::fmt::format;
 use std::io;
 use std::net::UdpSocket;
 use std::os::unix::io::AsRawFd;
@@ -120,7 +121,7 @@ fn main() -> io::Result<()> {
     );
 
     let (tx, rx) = mpsc::channel::<(Vec<u64>, Vec<u64>, Vec<u64>, Vec<u64>)>();
-    let writer = thread::spawn(move || {
+    let writer = thread::spawn({ let iface = String::from(iface); move || {
         while let Ok((planned_wakeup_time, effective_wakeup_time, effective_send_time, effective_recv_time)) = rx.recv() {
             let count = planned_wakeup_time.len();
             let (x, effective_wakeup_time_rel, effective_recv_time_rel) = build_series(&planned_wakeup_time, &effective_wakeup_time, &effective_send_time, &effective_recv_time);
@@ -139,7 +140,7 @@ fn main() -> io::Result<()> {
             );
 
             let html = plot.to_html();
-            if let Err(err) = std::fs::write("cyclic_timestamps.html", html) {
+            if let Err(err) = std::fs::write(format!("{iface}_cyclic_timestamps.html"), html) {
                 eprintln!("Failed to write cyclic_timestamps.html: {}", err);
                 continue;
             }
@@ -152,13 +153,13 @@ fn main() -> io::Result<()> {
                     .name("inter_packet_latency"),
             );
             let latency_html = latency_plot.to_html();
-            if let Err(err) = std::fs::write("inter_packet_latency.html", latency_html) {
+            if let Err(err) = std::fs::write(format!("{iface}_cyclic_inter_packet_latency.html"), latency_html) {
                 eprintln!("Failed to write inter_packet_latency.html: {}", err);
                 continue;
             }
             println!("Wrote inter_packet_latency.html ({} samples)", count);
         }
-    });
+    }});
 
     let mut planned_wakeup_time = Vec::with_capacity(sample_limit);
     let mut effective_wakeup_time = Vec::with_capacity(sample_limit);

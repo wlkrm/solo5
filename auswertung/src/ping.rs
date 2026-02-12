@@ -141,7 +141,7 @@ fn main() -> io::Result<()> {
 
     // ── Writer (NRT) thread ────────────────────────────────────────────
     let (tx, rx) = mpsc::channel::<Snapshot>();
-    let writer = thread::spawn(move || {
+    let writer = thread::spawn({ let iface = String::from(iface); move || {
         while let Ok(snap) = rx.recv() {
             let count = snap.count;
 
@@ -183,7 +183,7 @@ fn main() -> io::Result<()> {
             );
 
             let html = plot.to_html();
-            if let Err(err) = std::fs::write("ping_latency.html", html) {
+            if let Err(err) = std::fs::write(format!("{}_ping_latency.html", iface), html) {
                 eprintln!("Failed to write ping_latency.html: {}", err);
                 continue;
             }
@@ -197,13 +197,13 @@ fn main() -> io::Result<()> {
                     .name("inter_packet_latency"),
             );
             let ip_html = ip_plot.to_html();
-            if let Err(err) = std::fs::write("ping_inter_packet.html", ip_html) {
+            if let Err(err) = std::fs::write(format!("{}_ping_inter_packet.html", iface), ip_html) {
                 eprintln!("Failed to write ping_inter_packet.html: {}", err);
                 continue;
             }
             println!("Wrote ping_inter_packet.html ({} samples)", count);
         }
-    });
+    }});
 
     // ── Pre-allocate all buffers before going RT ───────────────────────
     let mut ping_send = Vec::with_capacity(sample_limit);
