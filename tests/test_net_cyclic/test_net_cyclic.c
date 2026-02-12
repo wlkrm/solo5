@@ -245,7 +245,7 @@ void put_uint8_t(uint8_t buffer_len) {
     str[i] = '\0'; // null-terminate
     puts(str);
 }
-
+#define TUN_MODE
 static bool send_udp_packet(int ifindex, const uint8_t *payload,
         size_t payload_len)
 {
@@ -258,7 +258,6 @@ static bool send_udp_packet(int ifindex, const uint8_t *payload,
     if (sizeof(*p) + payload_len > sizeof(buf))
         return false;
 
-#define TUN_MODE
 #ifndef TUN_MODE
     memcpy(p->ether.target, macaddr_brd, HLEN_ETHER);
     memcpy(p->ether.source, ni[ifindex].info.mac_address, HLEN_ETHER);
