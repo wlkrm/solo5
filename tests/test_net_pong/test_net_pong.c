@@ -113,6 +113,29 @@ static uint16_t udp_checksum(const struct ip *ip, const struct udppkt *udp,
     return (sum == 0) ? 0xffff : sum;
 }
 
+static void write_u64_be(uint8_t *dst, uint64_t value)
+{
+    for (int i = 0; i < 8; i++)
+        dst[i] = (uint8_t)(value >> (56 - (i * 8)));
+}
+
+static bool update_pong_timestamp(struct udppkt *up, uint16_t udp_len,
+        size_t index, uint64_t value)
+{
+    size_t data_len = udp_len - 8;
+    size_t offset = index * 8;
+
+    if (data_len < (4 * 8))
+        return false;
+    if (offset + 8 > data_len)
+        return false;
+
+    write_u64_be(up->data + offset, value);
+    up->checksum = 0;
+    up->checksum = udp_checksum(&up->ip, up, udp_len);
+    return true;
+}
+
 
 struct netif {
     uint8_t ipaddr[4];
@@ -180,6 +203,7 @@ static bool handle_ip(int ifindex, uint8_t *buf, uint8_t *data_buf, uint8_t *buf
             /* recalculate UDP checksum (IPv4 optional, but safer to include) */
             up->checksum = 0;
             up->checksum = udp_checksum(&up->ip, up, udp_len);
+            update_pong_timestamp(up, udp_len, 1, solo5_clock_monotonic());
             if (opt_verbose) xputs(ifindex, "Received UDP packet, sending reply\n");
             *was_udp = true;
             *buffer_len = udp_len - 8;
@@ -238,6 +262,12 @@ static bool handle_packet(int ifindex, uint8_t *data_buf, uint8_t *buffer_len,
     if (result != SOLO5_R_OK) {
         xputs(ifindex, "Read error\n");
         return false;
+    }
+
+    if (opt_verbose) {
+        xputs(ifindex, "Received packet: ");
+        put_uint8_t(len);
+        puts("\n");
     }
 
     if (handle_ip(ifindex, buf, data_buf, buffer_len, was_udp)) {
@@ -314,6 +344,9 @@ static bool ping_serve(void)
                     puts(")");
                 }
                 if (reply_pending) {
+                    struct udppkt *up = (struct udppkt *)reply_buffer;
+                    uint16_t udp_len = htons(up->length);
+                    update_pong_timestamp(up, udp_len, 2, solo5_clock_monotonic());
                     if (solo5_net_write(ni[0].h, reply_buffer, reply_len)
                             != SOLO5_R_OK) {
                         xputs(0, "Write error\n");

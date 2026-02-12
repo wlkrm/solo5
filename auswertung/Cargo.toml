@@ -3,6 +3,14 @@ name = "auswertung"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+path = "src/cyclic.rs"
+name = "cyclic"
+
+[[bin]]
+path = "src/ping.rs"
+name = "ping"
+
 [dependencies]
 libc = "0.2"
 plotly = "0.8"
